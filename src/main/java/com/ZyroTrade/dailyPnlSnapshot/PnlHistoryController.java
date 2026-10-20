@@ -10,15 +10,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.List;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.validation.annotation.Validated;
 
 @RestController
 @RequestMapping("/api/pnl")
+@Validated
+@io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
 public class PnlHistoryController {
     @Autowired
     private DailyPnlSnapshotService dailyPnlSnapshotService;
 
     @GetMapping("/history")
-    public List<PnlHistoryDto> getLastNDays(@RequestParam(defaultValue = "30")int days){
+    public List<PnlHistoryDto> getLastNDays(@RequestParam(defaultValue = "30") @Min(1) @Max(365) int days){
         return dailyPnlSnapshotService.getLastNDaysHistory(days);
     }
 

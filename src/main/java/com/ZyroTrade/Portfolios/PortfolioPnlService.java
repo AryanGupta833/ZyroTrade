@@ -2,86 +2,44 @@ package com.ZyroTrade.Portfolios;
 
 import com.ZyroTrade.DTO.HoldingPnlResponse;
 import com.ZyroTrade.DTO.PortfolioPnlResponse;
-import com.ZyroTrade.Orders.Order;
-import com.ZyroTrade.Orders.OrderRepository;
-import com.ZyroTrade.Orders.OrderType;
-import com.ZyroTrade.Stocks.Stock;
-import com.ZyroTrade.user.User;
-import com.ZyroTrade.user.UserRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
+import com.ZyroTrade.Price.QuoteFreshnessStatus;
 
 @Service
 public class PortfolioPnlService {
+    private final PortfolioRepository portfolioRepository;
+    private final long maxPriceAgeSeconds;
 
-    @Autowired
-    private OrderRepository orderRepository;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    public PortfolioPnlResponse calculatePnlByUsername(String username){
-
-        User user = userRepository
-                .findByUsername(username)
-                .orElseThrow();
-
-        List<Order> orders = orderRepository.findByUserUsernameOrderByCreatedAtDesc(username);
-
-        Map<Long, HoldingAccumulator> map = new HashMap<>();
-
-        for (Order o : orders) {
-            Long stockId = o.getStock().getId();
-
-            HoldingAccumulator acc =
-                    map.getOrDefault(stockId, new HoldingAccumulator());
-
-            if (o.getType() == OrderType.BUY) {
-                acc.quantity += o.getQuantity();
-                acc.buyQty += o.getQuantity();
-                acc.totalBuyValue += o.getPrice() * o.getQuantity();
-            } else if (o.getType() == OrderType.SELL) {
-                acc.quantity -= o.getQuantity();
-            }
-
-            acc.stock = o.getStock();
-            map.put(stockId, acc);
-        }
-
-        List<HoldingPnlResponse> responses = new ArrayList<>();
-        double totalPnl = 0;
-
-        for (HoldingAccumulator acc : map.values()) {
-
-            if (acc.quantity <= 0) continue;
-
-            double avgBuy = acc.totalBuyValue / acc.buyQty;
-            double currentPrice = acc.stock.getPrice();
-
-            double pnl = (currentPrice - avgBuy) * acc.quantity;
-            totalPnl += pnl;
-
-            responses.add(
-                    new HoldingPnlResponse(
-                            acc.stock.getSymbol(),
-                            acc.quantity,
-                            avgBuy,
-                            currentPrice,
-                            pnl
-                    )
-            );
-        }
-
-        return new PortfolioPnlResponse(responses, totalPnl);
+    public PortfolioPnlService(PortfolioRepository portfolioRepository,
+                               @Value("${trading.max-price-age-seconds:120}") long maxPriceAgeSeconds) {
+        this.portfolioRepository = portfolioRepository;
+        this.maxPriceAgeSeconds = maxPriceAgeSeconds;
     }
 
-
-    static class HoldingAccumulator {
-        int quantity = 0;
-        int buyQty = 0;
-        double totalBuyValue = 0;
-        Stock stock;
+    public PortfolioPnlResponse calculatePnlByUsername(String username) {
+        List<HoldingPnlResponse> holdings = portfolioRepository.findByUserUsername(username).stream()
+                .filter(p -> p.getQuantity() > 0)
+                .map(p -> {
+                    BigDecimal average = p.getAvgPrice();
+                    BigDecimal costBasis = p.getCostBasis();
+                    BigDecimal currentPrice = p.getStock().getPrice();
+                    boolean basisAvailable = costBasis != null && costBasis.signum() > 0;
+                    BigDecimal pnl = basisAvailable ? currentPrice.multiply(BigDecimal.valueOf(p.getQuantity())).subtract(costBasis)
+                            .setScale(4, RoundingMode.HALF_EVEN) : null;
+                    String status = QuoteFreshnessStatus.evaluate(currentPrice, p.getStock().getLastUpdated(), maxPriceAgeSeconds).name();
+                    return new HoldingPnlResponse(p.getStock().getSymbol(), p.getQuantity(), average, currentPrice, pnl,
+                            status, basisAvailable ? "REVIEWED" : "REVIEW_REQUIRED");
+                })
+                .toList();
+        BigDecimal total = holdings.stream().allMatch(h -> h.pnl() != null)
+                ? holdings.stream().map(HoldingPnlResponse::pnl).reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .setScale(4, RoundingMode.HALF_EVEN)
+                : null;
+        return new PortfolioPnlResponse(holdings, total);
     }
 }

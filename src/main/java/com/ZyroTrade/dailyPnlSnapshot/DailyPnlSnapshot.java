@@ -5,6 +5,8 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Entity
 @Data
@@ -17,11 +19,15 @@ public class DailyPnlSnapshot {
     private String username;
 
     private LocalDate snapshotDate;
-    private double realizedPnl;
-    private double unrealizedPnl;
-    private double netPnl;
-    private double walletBalance;
-    private double portfolioValue;
+    @Column(nullable = false, precision = 19, scale = 4) private BigDecimal realizedPnl = BigDecimal.ZERO.setScale(4);
+    @Column(precision = 19, scale = 4) private BigDecimal unrealizedPnl = BigDecimal.ZERO.setScale(4);
+    @Column(precision = 19, scale = 4) private BigDecimal netPnl = BigDecimal.ZERO.setScale(4);
+    @Column(nullable = false, precision = 19, scale = 4) private BigDecimal walletBalance = BigDecimal.ZERO.setScale(4);
+    @Column(nullable = false, precision = 19, scale = 4) private BigDecimal portfolioValue = BigDecimal.ZERO.setScale(4);
+    @Column(name = "all_quotes_fresh", nullable = false)
+    private boolean allQuotesFresh;
+    @Column(name = "all_cost_basis_reviewed", nullable = false)
+    private boolean allCostBasisReviewed;
 
     private LocalDateTime createdAt;
 

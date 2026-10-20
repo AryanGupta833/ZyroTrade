@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -18,8 +19,8 @@ public class Wallet {
     @JoinColumn(name = "user_id",nullable = false,unique = true)
     private User user;
 
-    @Column(nullable = false)
-    private double balance;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal balance = BigDecimal.ZERO;
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

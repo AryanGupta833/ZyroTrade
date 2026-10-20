@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import java.util.List;
 
@@ -18,6 +19,8 @@ public class PnlScheduler {
 
     @Autowired
     private DailyPnlSnapshotService dailyPnlSnapshotService;
+    @Autowired
+    private MeterRegistry meters;
 
     @Scheduled(cron = "0 * * * * ?")
 
@@ -25,7 +28,12 @@ public class PnlScheduler {
         List<User> users=userRepository.findAll();
 
         for(User user:users){
-            dailyPnlSnapshotService.takeSnapShot(user.getUsername());
+            try {
+                dailyPnlSnapshotService.takeSnapShot(user.getUsername());
+                meters.counter("daily_pnl.snapshot", "outcome", "success").increment();
+            } catch (RuntimeException failure) {
+                meters.counter("daily_pnl.snapshot", "outcome", "failure").increment();
+            }
         }
     }
 }

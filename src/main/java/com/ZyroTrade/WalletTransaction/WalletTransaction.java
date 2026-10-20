@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 @Entity
 @Data
@@ -22,8 +23,10 @@ public class WalletTransaction {
     @Enumerated(EnumType.STRING)
     private TransactionType  type;
 
-    private double amount;
-    private double balanceAfter;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal amount;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal balanceAfter;
 
     private LocalDateTime createdAt;
 

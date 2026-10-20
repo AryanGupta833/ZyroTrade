@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Entity
 @Data
@@ -16,7 +18,12 @@ public class PriceAlert {
     private String username;
     private String symbol;
 
-    private double targetPrice;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal targetPrice;
+
+    public void setTargetPrice(BigDecimal targetPrice) {
+        this.targetPrice = targetPrice == null ? null : targetPrice.setScale(4, RoundingMode.HALF_EVEN);
+    }
 
     @Enumerated(EnumType.STRING)
     private AlertType alertType;

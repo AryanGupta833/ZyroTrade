@@ -1,5 +1,7 @@
 package com.ZyroTrade.DTO;
 
+import java.math.BigDecimal;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -10,8 +12,10 @@ import lombok.NoArgsConstructor;
 public class PnlResponse {
     private String symbol;
     private int quantity;
-    private double avgBuyPrice;
-    private double currentPrice;
-    private double unrealizedPnl;
+    private BigDecimal avgBuyPrice;
+    private BigDecimal currentPrice;
+    private BigDecimal unrealizedPnl;
+    private String quoteStatus;
+    private String costBasisStatus;
 
 }

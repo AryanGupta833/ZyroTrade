@@ -3,62 +3,61 @@ package com.ZyroTrade.Price;
 import com.ZyroTrade.DTO.FinhubQuoteResponse;
 import com.ZyroTrade.Stocks.Stock;
 import com.ZyroTrade.Stocks.StockRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import com.ZyroTrade.Stocks.Stock;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.beans.factory.annotation.Value;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class ExternalPriceService {
+    private final StockRepository stockRepository;
+    private final FinnhubClient finnhubClient;
+    private final MeterRegistry meters;
+    private final StockQuoteUpdateService quoteUpdateService;
+    private final long maxQuoteAgeSeconds;
 
-    @Value("${finhub.api.key}")
-    private String apiKey;
-
-    @Autowired
-    private StockRepository stockRepository;
-
-    private final RestTemplate restTemplate = new RestTemplate();
-
-
-    private final AtomicInteger rrIndex = new AtomicInteger(0);
+    public ExternalPriceService(StockRepository stockRepository, FinnhubClient finnhubClient,
+                                StockQuoteUpdateService quoteUpdateService,
+                                MeterRegistry meters,
+                                @Value("${trading.max-price-age-seconds:120}") long maxQuoteAgeSeconds) {
+        this.stockRepository = stockRepository;
+        this.finnhubClient = finnhubClient;
+        this.quoteUpdateService = quoteUpdateService;
+        this.meters = meters;
+        this.maxQuoteAgeSeconds = maxQuoteAgeSeconds;
+    }
 
     public void refreshPrices() {
-        System.out.println("Prices refreshed (Finnhub Round Robin)");
-
         List<Stock> stocks = stockRepository.findAll();
         if (stocks.isEmpty()) return;
-
-        int startIndex = rrIndex.getAndUpdate(i -> (i + 1) % stocks.size());
-        Stock stock = stocks.get(startIndex);
-
-        try {
-            String url = "https://finnhub.io/api/v1/quote" +
-                    "?symbol=" + stock.getSymbol() +
-                    "&token=" + apiKey;
-
-            System.out.println("RR Fetching price for " + stock.getSymbol());
-
-            FinhubQuoteResponse response =
-                    restTemplate.getForObject(url, FinhubQuoteResponse.class);
-
-            if (response == null || response.getCurrentPrice() == null || response.getCurrentPrice() <= 0) {
-                System.out.println("Finnhub missing/invalid for " + stock.getSymbol());
-                return;
+        for (Stock stock : stocks) {
+            Timer.Sample sample = Timer.start(meters);
+            String outcome = "unavailable";
+            try {
+                FinhubQuoteResponse quote = finnhubClient.fetchQuote(stock.getSymbol());
+                Instant timestamp = Instant.ofEpochSecond(quote.getQuoteEpochSeconds());
+                Instant now = Instant.now();
+                if (timestamp.isAfter(now)) {
+                    outcome = "invalid_timestamp";
+                } else if (maxQuoteAgeSeconds < 0 || timestamp.isBefore(now.minusSeconds(maxQuoteAgeSeconds))) {
+                    outcome = "stale_quote";
+                } else {
+                    boolean updated = quoteUpdateService.updateIfNewer(stock.getSymbol(), quote.getCurrentPrice(),
+                            LocalDateTime.ofInstant(timestamp, ZoneId.systemDefault()));
+                    outcome = updated ? "success" : "older_than_stored";
+                }
+            } catch (MarketDataUnavailableException providerFailure) {
+                outcome = "unavailable";
+            } finally {
+                meters.counter("market_data.refresh", "outcome", outcome).increment();
+                sample.stop(meters.timer("market_data.refresh.duration"));
             }
-
-            stock.setPrice(response.getCurrentPrice());
-            stock.setLastUpdated(LocalDateTime.now());
-            stock.setTradable(true);
-            stockRepository.save(stock);
-
-            System.out.println("Updated " + stock.getSymbol() + " -> " + response.getCurrentPrice());
-
-        } catch (Exception e) {
-            System.out.println("Finnhub error for " + stock.getSymbol() + ": " + e.getMessage());
         }
     }
 }

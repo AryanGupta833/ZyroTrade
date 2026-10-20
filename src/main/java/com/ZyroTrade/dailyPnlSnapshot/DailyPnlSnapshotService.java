@@ -5,14 +5,15 @@ import com.ZyroTrade.Portfolios.Portfolio;
 import com.ZyroTrade.Portfolios.PortfolioRepository;
 import com.ZyroTrade.Wallet.Wallet;
 import com.ZyroTrade.Wallet.WalletRepository;
-import com.ZyroTrade.user.User;
-import com.ZyroTrade.user.UserRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import com.ZyroTrade.DTO.PnlHistoryDto;
-import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
+import com.ZyroTrade.Price.QuoteFreshnessStatus;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -27,7 +28,9 @@ public class DailyPnlSnapshotService {
                 s.getUnrealizedPnl(),
                 s.getNetPnl(),
                 s.getPortfolioValue(),
-                s.getWalletBalance()
+                s.getWalletBalance(),
+                s.isAllQuotesFresh(),
+                s.isAllCostBasisReviewed()
         );
     }
 
@@ -39,13 +42,12 @@ public class DailyPnlSnapshotService {
     private WalletRepository walletRepository;
 
     @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
     private DailyPnlSnapshotRepository dailyPnlSnapshotRepository;
 
     @Autowired
     private OrderRepository orderRepository;
+    @Value("${trading.max-price-age-seconds:120}")
+    private long maxPriceAgeSeconds;
 
     public void takeSnapShot(String username) {
 
@@ -55,41 +57,32 @@ public class DailyPnlSnapshotService {
         List<Portfolio> portfolios =
                 portfolioRepository.findByUserUsername(username);
 
-        double unrealizedPnl = portfolios.stream()
-                .mapToDouble(p ->
-                        (p.getStock().getPrice() - p.getAvgPrice())
-                                * p.getQuantity()
-                ).sum();
+        boolean allCostBasisReviewed = portfolios.stream().allMatch(p -> p.getCostBasis() != null
+                && p.getCostBasis().signum() > 0);
+        BigDecimal unrealizedPnl = allCostBasisReviewed ? portfolios.stream()
+                .map(p -> p.getStock().getPrice().multiply(BigDecimal.valueOf(p.getQuantity())).subtract(p.getCostBasis()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(4, RoundingMode.HALF_EVEN) : null;
 
-        double portfolioValue = portfolios.stream()
-                .mapToDouble(p ->
-                        p.getStock().getPrice() * p.getQuantity()
-                ).sum();
+        BigDecimal portfolioValue = portfolios.stream()
+                .map(p -> p.getStock().getPrice().multiply(BigDecimal.valueOf(p.getQuantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add).setScale(4, RoundingMode.HALF_EVEN);
+        boolean allQuotesFresh = portfolios.stream().allMatch(p -> QuoteFreshnessStatus.evaluate(
+                p.getStock().getPrice(), p.getStock().getLastUpdated(), maxPriceAgeSeconds)
+                == QuoteFreshnessStatus.FRESH);
 
         Wallet wallet = walletRepository
                 .findByUserUsername(username)
-                .orElseGet(() -> {
-                    User user = userRepository.findByUsername(username)
-                            .orElseThrow(() -> new RuntimeException("User not found: " + username));
+                .orElseThrow(() -> new IllegalStateException("Wallet is missing for the P&L snapshot"));
 
-                    Wallet w = new Wallet();
-                    w.setUser(user);
-                    w.setBalance(0.0);
-
-                    walletRepository.save(w);
-
-                    System.out.println(" Auto-created wallet for: " + username);
-
-                    return w;
-                });
-
-        double walletBalance = wallet.getBalance();
+        BigDecimal walletBalance = wallet.getBalance();
 
 
-        double realizedPnl =
+        BigDecimal realizedPnl =
                 orderRepository.sumRealizedPnl(username);
 
-        double netPnl = realizedPnl + unrealizedPnl;
+        if (realizedPnl == null) realizedPnl = BigDecimal.ZERO.setScale(4);
+        BigDecimal netPnl = unrealizedPnl == null ? null
+                : realizedPnl.add(unrealizedPnl).setScale(4, RoundingMode.HALF_EVEN);
 
 
         DailyPnlSnapshot snapshot = dailyPnlSnapshotRepository
@@ -106,12 +99,14 @@ public class DailyPnlSnapshotService {
         snapshot.setNetPnl(netPnl);
         snapshot.setPortfolioValue(portfolioValue);
         snapshot.setWalletBalance(walletBalance);
+        snapshot.setAllQuotesFresh(allQuotesFresh);
+        snapshot.setAllCostBasisReviewed(allCostBasisReviewed);
 
         dailyPnlSnapshotRepository.save(snapshot);
 
-        System.out.println("Daily PnL snapshot saved for: " + username);
     }
     public List<PnlHistoryDto> getLastNDaysHistory(int days) {
+        if (days < 1 || days > 365) throw new IllegalArgumentException("days must be between 1 and 365");
         String username = SecurityContextHolder
                 .getContext()
                 .getAuthentication()
@@ -125,6 +120,9 @@ public class DailyPnlSnapshotService {
                 ).stream().map(this::toDto).collect(Collectors.toList());
     }
     public List<PnlHistoryDto> getHistoryBetween(LocalDate from, LocalDate to) {
+        if (from == null || to == null || to.isBefore(from) || to.isAfter(from.plusDays(365))) {
+            throw new IllegalArgumentException("Date range must be ordered and no longer than 366 days");
+        }
         String username = SecurityContextHolder
                 .getContext()
                 .getAuthentication()

@@ -1,9 +1,13 @@
 package com.ZyroTrade.DTO;
 
+import java.math.BigDecimal;
+
 public record HoldingPnlResponse(
         String symbol,
         int quantity,
-        double avgBuyPrice,
-        double currentPrice,
-        double pnl
+        BigDecimal avgBuyPrice,
+        BigDecimal currentPrice,
+        BigDecimal pnl,
+        String quoteStatus,
+        String costBasisStatus
 ) {}

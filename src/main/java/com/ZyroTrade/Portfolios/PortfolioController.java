@@ -12,9 +12,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import com.ZyroTrade.DTO.PortfolioHoldingResponse;
 
 @RestController
 @RequestMapping("/api/portfolio")
+@io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Portfolio", description = "Authenticated user's holdings and P&L")
 public class PortfolioController {
 
     private final PortfolioHoldingRepository  portfolioRepository;
@@ -30,13 +33,13 @@ public class PortfolioController {
     }
 
     @GetMapping
-    public List<PortfolioHolding> myPortfolio(
+    public List<PortfolioHoldingResponse> myPortfolio(
             @AuthenticationPrincipal UserDetails user) {
 
         String username= user.getUsername();
         User user1=userRepository.findByUsername(username).orElseThrow();
         Long userId=user1.getId();
-        return portfolioRepository.findByUserid(userId);
+        return portfolioRepository.findByUserid(userId).stream().map(PortfolioHoldingResponse::from).toList();
     }
 
     @GetMapping("/pnl")

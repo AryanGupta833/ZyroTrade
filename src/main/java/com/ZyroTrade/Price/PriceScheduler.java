@@ -19,7 +19,6 @@ public class PriceScheduler {
 
     @Scheduled(fixedDelay = 60000)
     public void updatePriceDuringMarketHours(){
-        System.out.println("Scheduler ticked");
         externalPriceService.refreshPrices();
     }
 
